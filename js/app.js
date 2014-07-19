@@ -7,11 +7,12 @@ window.addEventListener('DOMContentLoaded', function() {
 
 
 function BuildBrowser() {
+  var currentUrl = "";
+  
   var tabbrowser = document.createElement("div");
   tabbrowser.className = "tabbrowser";
   
   var iframe = document.createElement("iframe");
-  iframe.setAttribute("src", "about:blank");
   iframe.setAttribute("mozbrowser", "true");
   iframe.setAttribute("remote", "true");
   
@@ -27,12 +28,18 @@ function BuildBrowser() {
   buttonForward.onclick = () => iframe.goForward();
   
   var inputUrl = document.createElement("input");
-  inputUrl.type = "text";
+  inputUrl.type = "url";
   inputUrl.placeholder = ""
   inputUrl.className = "input-url";
   
-  inputUrl.onfocus = () => urlbar.classList.add("focus");
-  inputUrl.onblur = () => urlbar.classList.remove("focus");
+  inputUrl.onfocus = () => {
+    inputUrl.value = currentUrl;
+    inputUrl.setSelectionRange(0, inputUrl.value.length);
+    urlbar.classList.add("focus");
+  }
+  inputUrl.onblur = () => {
+    urlbar.classList.remove("focus");
+  }
   inputUrl.onchange = ProcessURL;
   
   var buttonGo = document.createElement("button");
@@ -78,7 +85,13 @@ function BuildBrowser() {
   });
 
   iframe.addEventListener('mozbrowserlocationchange', function (event) {
-    inputUrl.value = event.detail;
+    buttonBack.blur();
+    buttonForward.blur();
+    if (event.detail != "about:blank") {
+      currentUrl = event.detail;
+    } else {
+      currentUrl = "";
+    }
     var backReq = iframe.getCanGoBack();
     backReq.onsuccess = () => {
       if (backReq.result) {
@@ -97,12 +110,14 @@ function BuildBrowser() {
     }
   });
   
+  iframe.addEventListener("mozbrowsertitlechange", (event) => {
+    inputUrl.value = event.detail || currentUrl;
+  });
   
   function ProcessURL() {
+    var url;
     var v = inputUrl.value;
     inputUrl.blur();
-    console.log("ProcessURL", v)
-    var url;
     if ((v.search(/\s/) > -1) || (v.search(".") == -1)) {
       url = SEARCHURL.replace("%s", encodeURI(v));
     } else {
@@ -116,7 +131,6 @@ function BuildBrowser() {
         url = "http://" + v;
       }
     }
-    console.log("URL", url);
     iframe.src = url;
   }
 }
