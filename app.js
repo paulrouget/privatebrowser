@@ -43,7 +43,7 @@ function BuildBrowser(url, visible) {
   iframe.setAttribute("mozbrowser", "true");
   iframe.setAttribute("remote", "true");
   iframe.setAttribute("mozasyncpanzoom", "true");
-  iframe.setAttribute("mozallowfullscreen", true");
+  iframe.setAttribute("mozallowfullscreen", "true");
 
   if (url) {
     iframe.setAttribute("src", url);
@@ -152,6 +152,16 @@ function BuildBrowser(url, visible) {
   
   iframe.addEventListener("mozbrowserclose", (event) => {
     KillBrowser(uuid)
+  });
+  
+  
+  iframe.addEventListener("mozbrowsercontextmenu", function(event) {
+    event.preventDefault();
+    for (node of event.detail.systemTargets) {
+      if (node.nodeName == "A") {
+        BuildBrowser(node.data.uri, false);
+      }
+    }
   });
   
   function ProcessURL() {
