@@ -1,16 +1,16 @@
 const SEARCHURL = "https://duckduckgo.com/?q=%s";
 const SCHEMES = ["http://","https://","ftp://"];
+const CLEAR_TIMEOUT = 3 * 60 * 1000; // after 3 minutes hidden, we clear the tabs
 
 window.addEventListener("unload", ClearPrivateData, true);
 
-navigator.addIdleObserver({
-  time: 10, // Ten seconds
-  onidle: function () {
-    KillAllTabsAndClearPrivateData();
-  },
-  onactive: function () {}
-});
-
+var visibilityTimeout;
+document.addEventListener("visibilitychange", () => {
+   clearTimeout(visibilityTimeout);
+   if (document.hidden) {
+     visibilityTimeout = setTimeout(KillAllTabsAndClearPrivateData, 1000 * 10);
+   }
+}, true);
 
 window.addEventListener('DOMContentLoaded', function() {
   document.querySelector("#button-killtab").onclick = KillVisibleBrowser;
@@ -43,6 +43,8 @@ function BuildBrowser(url, visible) {
   iframe.setAttribute("mozbrowser", "true");
   iframe.setAttribute("remote", "true");
   iframe.setAttribute("mozasyncpanzoom", "true");
+  iframe.setAttribute("mozallowfullscreen", true");
+
   if (url) {
     iframe.setAttribute("src", url);
   }
