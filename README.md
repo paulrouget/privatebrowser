@@ -1,7 +1,7 @@
 A privacy-focused browser for Firefox OS.
 No history, no bookmarks, no session restore.
 
-*Finally, A good porn browser for Firefox OS.*
+**good for porn**
 
 Tabs still have internal history and cookies to
 make browsing comfortable enough. But all is destroyed
