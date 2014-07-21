@@ -1,20 +1,28 @@
 {
   "version": "1.0",
-    "name": "Private Browser",
-    "description": "Private Browsing.",
-    "launch_path": "/app.html",
-    "fullscreen": "true",
-    "icons": {
-      "40": "/icons/icon40x40.png",
-      "60": "/icons/icon60x60.png",
-      "128": "/icons/icon128x128.png"
-    },
-    "developer": {
-      "name": "PaulRouget",
-      "url": "http://paulrouget.com"
-    },
-    "type": "privileged",
-    "permissions": {
-      "browser":{}
+  "name": "Private Browser",
+  "description": "Private Browsing.",
+  "launch_path": "/app.html",
+  "fullscreen": "true",
+  "icons": {
+    "40": "/icons/icon40x40.png",
+    "60": "/icons/icon60x60.png",
+    "128": "/icons/icon128x128.png"
+  },
+  "developer": {
+    "name": "PaulRouget",
+    "url": "http://paulrouget.com"
+  },
+  "type": "privileged",
+  "permissions": {
+    "browser":{}
+  },
+  "activities": {
+    "share": {
+      "href": "/app.html",
+      "filters": {
+        "type": ["url"]
+      }
     }
+  }
 }

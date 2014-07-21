@@ -2,278 +2,458 @@ const SEARCHURL = "https://duckduckgo.com/?q=%s";
 const SCHEMES = ["http://","https://","ftp://"];
 const CLEAR_TIMEOUT = 3 * 60 * 1000; // after 3 minutes hidden, we clear the tabs
 
-window.addEventListener("unload", ClearPrivateData, true);
+const BROWSER_EVENTS = [
+  "mozbrowserloadstart",
+  "mozbrowserloadend",
+  "mozbrowsericonchange",
+  "mozbrowserlocationchange",
+  "historychanged",
+  "historychanged",
+  "mozbrowsertitlechange",
+  "longpress"
+];
 
-var visibilityTimeout;
-document.addEventListener("visibilitychange", () => {
-   clearTimeout(visibilityTimeout);
-   if (document.hidden) {
-     visibilityTimeout = setTimeout(KillAllTabsAndClearPrivateData, 1000 * 10);
-   }
-}, true);
+var gBrowserCount = 0;
 
-window.addEventListener('DOMContentLoaded', function() {
-  document.querySelector("#button-killtab").onclick = KillVisibleBrowser;
-  var request = navigator.mozApps.getSelf();
-  request.onsuccess = function() {
-    request.result.clearBrowserData();
-    document.querySelector("#button-addtab").onclick = () => BuildBrowser(null, true);
-  };
-});
+var gPrivateMode = false;
 
-var gCount = 0;
-function BuildBrowser(url, visible) {
-  var currentUrl = "";
-  var uuid = gCount++;
+var UI = {
+  init: function() {
+    DecorateWithEventEmitter(this);
 
-  var tabbrowser = document.createElement("div");
-  tabbrowser.className = "tabbrowser";
-  tabbrowser.id = "tabbrowser-" + uuid;
-  tabbrowser.dataset.uuid = uuid;
-  
-  var tab = document.createElement("button");
-  tab.className = "button-tab";
-  tab.onclick = () => SelectBrowser(uuid);
-  tab.id = "button-tab-" + uuid;
-  tab.dataset.uuid = uuid;
-  document.querySelector("#tabs").appendChild(tab);
-  tab.scrollIntoView();
-    
-  var iframe = document.createElement("iframe");
-  iframe.setAttribute("mozbrowser", "true");
-  iframe.setAttribute("remote", "true");
-  iframe.setAttribute("mozasyncpanzoom", "true");
-  iframe.setAttribute("mozallowfullscreen", "true");
+    this.setupInputURL();
+    this.setupHistoryButtons();
+    this.setupNavigationButtons();
 
+    if (gPrivateMode) {
+      this.clearBrowserData(function() {
+        this.selectBrowser(this.buildBrowser());
+      });
+    } else {
+      this.selectBrowser(this.buildBrowser());
+    }
+  },
+
+  clearBrowserData: function(callback) {
+    // FIXME: is it called?
+    var request = navigator.mozApps.getSelf();
+    request.onsuccess = function() {
+      request.result.clearBrowserData();
+      if (callback) {
+        callback();
+      }
+    };
+  },
+
+  uninit: function() {
+    if (gPrivateMode) {
+      this.clearBrowserData();
+    }
+  },
+
+  onVisibilityChange: function() {
+    clearTimeout(this._visibilityTimeout);
+    if (gPrivateMode && document.hidden) {
+      this._visibilityTimeout = setTimeout(this.killAllTabsAndClearPrivateData, CLEAR_TIMEOUT);
+    }
+  },
+
+  killAllTabsAndClearPrivateData: function() {
+    this.clearBrowserData(function() {
+      for (var b of this.browsers) {
+        b.destroy();
+      }
+    });
+  },
+
+  onActivityRequestfunction: function(event) {
+    var option = event.source;
+    var url = option.data.url;
+    this.selectBrowser(this.buildBrowser(url));
+  },
+
+  browsers: new Set(),
+  buildBrowser: function(url, userInput) {
+    var browser = new Browser(url, userInput);
+    this.browsers.add(browser);
+    return browser;
+  },
+
+  selectBrowser: function(browser) {
+    if (this.currentBrowser) {
+      this.currentBrowser.hide();
+      this.currentBrowser.removeAllListeners();
+    }
+    if (browser) {
+      for (var e of BROWSER_EVENTS) {
+        browser.on(e, this.handleEvent);
+      }
+      browser.show();
+    }
+
+    this.currentBrowser = browser;
+    this.updateURLBar()
+  },
+
+  /*
+    "mozbrowserloadstart",
+    "mozbrowserloadend",
+    "mozbrowsericonchange",
+    "mozbrowserlocationchange",
+    "historychanged",
+    "mozbrowsertitlechange",
+    "longpress"
+  */
+  handleEvent: function(event) {
+    switch (event) {
+      case "historychanged":
+      case "mozbrowserloadstart":
+      case "mozbrowserloadend":
+      case "mozbrowsertitlechange":
+      case "mozbrowserlocationchange":
+        this.updateURLBar();
+        break;
+      case "longpress":
+        this.buildBrowser(this.currentBrowser.longPressLink);
+      default:
+        break;
+    }
+  },
+
+  killBrowser: function(browser) {
+    this.browsers.delete(browser);
+    if (browser == this.currentBrowser) {
+      this.currentBrowser = null;
+    }
+    browser.destroy();
+  },
+
+  updateURLBar: function() {
+    var urlbar = document.querySelector("#urlbar");
+    var input = document.querySelector("#input-url");
+
+    var isFocused = urlbar.classList.contains("focus");
+
+    if (!this.currentBrowser) {
+      urlbar.classList.remove("canGoBack");
+      urlbar.classList.remove("canGoForward");
+      urlbar.classList.remove("loading");
+      if (!isFocused) {
+        input.value = "";
+      }
+      return;
+    }
+
+    if (this.currentBrowser.canGoBack()) {
+      urlbar.classList.add("canGoBack");
+    } else {
+      urlbar.classList.remove("canGoBack");
+    }
+
+    if (this.currentBrowser.canGoForward()) {
+      urlbar.classList.add("canGoForward");
+    } else {
+      urlbar.classList.remove("canGoForward");
+    }
+
+    if (this.currentBrowser.isLoading()) {
+      urlbar.classList.add("loading");
+    } else {
+      urlbar.classList.remove("loading");
+    }
+
+    if (!isFocused) {
+      input.value = this.currentBrowser.prettyTitle;
+    }
+  },
+
+  setupInputURL: function() {
+    var input = document.querySelector("#input-url");
+    var urlbar = document.querySelector("#urlbar");
+    input.value = "";
+    input.onfocus = function() {
+      if (UI.currentBrowser) {
+        input.value = UI.currentBrowser.userInput;
+      }
+      input.setSelectionRange(0, input.value.length);
+      urlbar.classList.add("focus");
+    };
+    input.onblur = function() {
+      urlbar.classList.remove("focus");
+    };
+    input.onchange = UI.processInput;
+  },
+
+  processInput: function() {
+    var input = document.querySelector("#input-url");
+    var v = input.value;
+
+    input.blur();
+
+    setTimeout(function() {
+      var url;
+      if ((v.search(/\s/) > -1) || (v.search(/\./) == -1)) {
+        url = SEARCHURL.replace("%s", encodeURI(v));
+      } else {
+        for (var s of SCHEMES) {
+          if (v.search(s) == 0) {
+            url = v;
+            break;
+          }
+        }
+        if (!url) {
+          url = "http://" + v;
+        }
+      }
+      if (UI.currentBrowser) {
+        UI.currentBrowser.newURL(url, v);
+      } else {
+        var browser = UI.buildBrowser(url, v);
+        UI.selectBrowser(browser);
+      }
+    }, 0);
+  },
+
+  setupHistoryButtons: function() {
+    var back = document.querySelector("#button-back");
+    var fwd = document.querySelector("#button-forward");
+    back.onclick = function() {
+      if (UI.currentBrowser) {
+        UI.currentBrowser.iframe.goBack();
+      }
+    }
+    fwd.onclick = function() {
+      if (UI.currentBrowser) {
+        UI.currentBrowser.iframe.goForward();
+      }
+    }
+  },
+
+  setupNavigationButtons: function() {
+    var go = document.querySelector("#button-go");
+    var stop = document.querySelector("#button-stop");
+    var reload = document.querySelector("#button-reload");
+    var addtab = document.querySelector("#button-addtab");
+
+    go.onclick = UI.processInput;
+    stop.onclick = function() {
+      if (UI.currentBrowser) {
+        UI.currentBrowser.iframe.stop();
+      }
+    }
+    reload.onclick = function() {
+      if (UI.currentBrowser) {
+        UI.currentBrowser.iframe.reload();
+      }
+    }
+    addtab.onclick = function() {
+      var browser = UI.buildBrowser();
+      UI.selectBrowser(browser);
+    }
+  },
+}
+
+for (var f in UI) {
+  if (typeof UI[f] == "function") {
+    UI[f] = UI[f].bind(UI);
+  }
+}
+
+function Browser(url, userInput) {
+  DecorateWithEventEmitter(this);
+  this.buildDOM();
+  this.setupListeners();
   if (url) {
-    iframe.setAttribute("src", url);
+    this.newURL(url, userInput);
   }
-  
-  var urlbar = document.createElement("div");
-  urlbar.className = "urlbar";
-  
-  var buttonBack = document.createElement("button");
-  buttonBack.className = "button-history button-back fa fa-arrow-left";
-  buttonBack.onclick = () => iframe.goBack();
+}
 
-  var buttonForward = document.createElement("button");
-  buttonForward.className = "button-history button-forward fa fa-arrow-right";
-  buttonForward.onclick = () => iframe.goForward();
-  
-  var inputUrl = document.createElement("input");
-  inputUrl.type = "url";
-  inputUrl.placeholder = ""
-  inputUrl.className = "input-url";
-  
-  inputUrl.onfocus = () => {
-    inputUrl.value = currentUrl;
-    inputUrl.setSelectionRange(0, inputUrl.value.length);
-    urlbar.classList.add("focus");
-  }
-  inputUrl.onblur = () => {
-    urlbar.classList.remove("focus");
-  }
-  inputUrl.onchange = ProcessURL;
-  
-  var buttonGo = document.createElement("button");
-  buttonGo.className = "button-go fa fa-arrow-right";
-  buttonGo.onclick = ProcessURL;
-  
-  var buttonStop = document.createElement("button");
-  buttonStop.className = "button-stop fa fa-times";
-  buttonStop.onclick = () => iframe.stop();
+Browser.prototype = {
 
-  var buttonReload = document.createElement("button");
-  buttonReload.className = "button-reload fa fa-rotate-right";
-  buttonReload.onclick = () => iframe.reload();
+  buildDOM: function() {
+    var iframe = document.createElement("iframe");
+    iframe.setAttribute("mozbrowser", "true");
+    iframe.setAttribute("remote", "true");
+    iframe.setAttribute("mozasyncpanzoom", "true");
+    iframe.setAttribute("mozallowfullscreen", "true");
+    document.querySelector("#deck").appendChild(iframe);
 
-  tabbrowser.appendChild(urlbar);
-  urlbar.appendChild(buttonBack);
-  urlbar.appendChild(buttonForward);
-  urlbar.appendChild(inputUrl);
-  urlbar.appendChild(buttonGo);
-  urlbar.appendChild(buttonStop);
-  urlbar.appendChild(buttonReload);
-  
-  tabbrowser.appendChild(iframe);
-    
-  document.querySelector("#deck").appendChild(tabbrowser);
-  
-  iframe.addEventListener('mozbrowserloadstart', function () {
-    urlbar.classList.add("loading");
-    urlbar.classList.remove("loaded");
-  });
+    var tab = document.createElement("button");
+    tab.className = "button-tab";
+    var self = this;
+    tab.onclick = function() { UI.selectBrowser(self) }
+    document.querySelector("#tabs").appendChild(tab);
 
-  iframe.addEventListener('mozbrowserloadend', function () {
-    urlbar.classList.add("loaded");
-    urlbar.classList.remove("loading");
-  });
+    this.iframe = iframe;
+    this.tab = tab;
+  },
 
-  iframe.addEventListener('mozbrowsererror', function (event) {
-    urlbar.classList.remove("loaded");
-    urlbar.classList.remove("loading");
-    alert("Loading error: " + event.detail);
-  });
-  
-  
-  iframe.addEventListener("mozbrowsericonchange", function(event) {
-    tab.style.backgroundImage = "url(" + event.detail.href + ")";
-  });
+  destroy: function() {
+    this.iframe.remove();
+    this.tab.remove();
+    this.iframe = null;
+    this.tab = null;
+  },
 
-  iframe.addEventListener('mozbrowserlocationchange', function (event) {
-    buttonBack.blur();
-    buttonForward.blur();
-    if (event.detail != "about:blank") {
-      currentUrl = event.detail;
-    } else {
-      currentUrl = "";
-    }
-    var backReq = iframe.getCanGoBack();
-    backReq.onsuccess = () => {
-      if (backReq.result) {
-        urlbar.classList.add("canGoBack");
-      } else {
-        urlbar.classList.remove("canGoBack");
+  canGoBack: function() {
+    return this._canGoBack;
+  },
+
+  canGoForward: function() {
+    return this._canGoForward;
+  },
+
+  isLoading: function() {
+    return this._loading;
+  },
+
+  get title() {
+    return this._title;
+  },
+
+  get location() {
+    return this._location;
+  },
+
+  get prettyTitle() {
+    var title = this._title;
+    var location = this._location == "about:blank" ? "" : this._location;
+    var userInput = this._userInput;
+
+    return title || location || userInput || "";
+  },
+
+  get longPressLink() {
+    return this._longpressLink;
+  },
+
+  get favicon() {
+    return this._favicon;
+  },
+
+  get userInput() {
+    return this._userInput || "";
+  },
+
+  newURL: function(url, userInput) {
+    this._title = null;
+    this._location = url;
+    this._userInput = userInput;
+    this.iframe.src = url;
+  },
+
+  hide: function() {
+    var self = this;
+    clearTimeout(this._visibilityTimeout);
+    this._visibilityTimeout = setTimeout(function() {
+      // self.iframe.setVisible(false);
+    });
+    this.iframe.classList.remove("selected");
+    this.tab.classList.remove("selected");
+  },
+
+  show: function() {
+    var self = this;
+    clearTimeout(this._visibilityTimeout);
+    this._visibilityTimeout = setTimeout(function() {
+      // self.iframe.setVisible(true);
+    }, 0);
+    this.iframe.classList.add("selected");
+    this.tab.classList.add("selected");
+  },
+
+  setupListeners: function() {
+    var self = this;
+    var iframe = this.iframe;
+    iframe.addEventListener("mozbrowserloadstart", function () {
+      self._title = null;
+      self._loading = true;
+      self.emit("mozbrowserloadstart");
+      self.tab.classList.add("loading");
+    });
+
+    iframe.addEventListener("mozbrowserloadend", function () {
+      self.tab.classList.remove("loading");
+      self._loading = false;
+      self.emit("mozbrowserloadend");
+      if (self.location && self.location != "about:blank") {
+        var s = 36 * window.devicePixelRatio;
+        console.log("req");
+        self.iframe.getScreenshot(s,s).onsuccess = function(e) {
+          console.log("done");
+          var objectURL = URL.createObjectURL(e.target.result);
+          console.log("more");
+          self.tab.style.backgroundImage = 'url(' + objectURL + ')';
+          // FIXME: revoke
+        }
       }
-    }
-    var fwdReq = iframe.getCanGoForward();
-    fwdReq.onsuccess = (req) => {
-      if (fwdReq.result) {
-        urlbar.classList.add("canGoForward");
-      } else {
-        urlbar.classList.remove("canGoForward");
+    });
+
+    iframe.addEventListener('mozbrowsererror', function (event) {
+      // FIXME
+    });
+
+    iframe.addEventListener("mozbrowsericonchange", function (event) {
+      self._favicon = event.detail.href;
+      self.emit("mozbrowsericonchange");
+    });
+
+    iframe.addEventListener("mozbrowserlocationchange", function (event) {
+      self._title = null;
+      self._location = event.detail;
+      self.emit("mozbrowserlocationchange");
+      var backReq = iframe.getCanGoBack();
+      backReq.onsuccess = () => {
+        self._canGoBack = backReq.result;
+        self.emit("historychanged");
       }
-    }
-  });
-  
-  iframe.addEventListener("mozbrowsertitlechange", (event) => {
-    inputUrl.value = event.detail || currentUrl;
-  });
-  
-  iframe.addEventListener("mozbrowserclose", (event) => {
-    KillBrowser(uuid)
-  });
-  
-  
-  iframe.addEventListener("mozbrowsercontextmenu", function(event) {
-    event.preventDefault();
-    for (node of event.detail.systemTargets) {
-      if (node.nodeName == "A") {
-        BuildBrowser(node.data.uri, false);
+      var fwdReq = iframe.getCanGoForward();
+      fwdReq.onsuccess = (req) => {
+        self._canGoBack = backReq.result;
+        self.emit("historychanged");
       }
-    }
-  });
-  
-  function ProcessURL() {
-    var url;
-    var v = inputUrl.value;
-    inputUrl.blur();
-    if ((v.search(/\s/) > -1) || (v.search(/\./) == -1)) {
-      url = SEARCHURL.replace("%s", encodeURI(v));
-    } else {
-      for (var s of SCHEMES) {
-        if (v.search(s) == 0) {
-          url = v;
+    });
+
+    iframe.addEventListener("mozbrowsertitlechange", function (event) {
+      self._title = event.detail;
+      self.emit("mozbrowsertitlechange");
+    });
+
+    iframe.addEventListener("mozbrowserclose", function (event) {
+      UI.killBrowser(self);
+    });
+
+    iframe.addEventListener("mozbrowsercontextmenu", function (event) {
+      event.preventDefault();
+      for (node of event.detail.systemTargets) {
+        if (node.data && node.data.uri) {
+          self._longpressLink = node.data.uri;
+          self.emit("longpress");
           break;
         }
       }
-      if (!url) {
-        url = "http://" + v;
-      }
-    }
-    iframe.src = url;
-  }
-  
-  if (visible) {
-    SelectBrowser(uuid);
-  }
-  HideKillButtonIfNeeded();
-}
-
-function KillVisibleBrowser() {
-  var browser = document.querySelector(".tabbrowser.visible");
-  if (browser) {
-    KillBrowser(browser.dataset.uuid);
-  }
-}
-
-var timeouts = {};
-
-function KillBrowser(uuid) {
-  clearTimeout(timeouts[uuid]);
-  
-  var browser = document.getElementById("tabbrowser-" + uuid);
-  if (browser) {
-    var nextUuid;
-    if (browser.nextSibling) {
-      nextUuid = browser.nextSibling.dataset.uuid;
-    } else if (browser.previousSibling) {
-      nextUuid = browser.previousSibling.dataset.uuid;
-    }
-
-    browser.remove();
-    document.getElementById("button-tab-" + uuid).remove();
-    HideKillButtonIfNeeded();
-    if (nextUuid) {
-      SelectBrowser(nextUuid);
-    }
-  }
-}
-
-function SelectBrowser(uuid) {
-
-  // Clear previous selection
-  var previousBrowser = document.querySelector(".tabbrowser.visible");
-  if (previousBrowser) {
-    var previousUuid = previousBrowser.dataset.uuid;
-    previousBrowser.classList.remove("visible");
-    clearTimeout(timeouts[previousUuid]);
-    timeouts[previousUuid] = setTimeout(() => {
-      previousBrowser.querySelector("iframe").setVisible(false);
-      timeouts[previousUuid] = null;
     });
-  }
-  var previousTab = document.querySelector(".button-tab.visible");
-  if (previousTab) {
-    previousTab.classList.remove("visible");
-  }
-  
-  // Set new browser
-  var browser = document.getElementById("tabbrowser-" + uuid);
-  if (browser) {
-    browser.classList.add("visible");
-    
-    clearTimeout(timeouts[uuid]);
-    timeouts[uuid] = setTimeout(() => {
-      browser.querySelector("iframe").setVisible(true);
-      timeouts[uuid] = null;
+
+    iframe.addEventListener("mozbrowseropenwindow", function (event) {
+      // FIXME
     });
-  }
-  var tab = document.getElementById("button-tab-" + uuid);
-  if (tab) {
-    tab.classList.add("visible");
-  }
+  },
 }
 
-function HideKillButtonIfNeeded() {
-  var killButton = document.querySelector("#button-killtab");
-  if (document.querySelectorAll(".tabbrowser").length == 0) {
-    killButton.setAttribute("hidden", "true");
-  } else {
-    killButton.removeAttribute("hidden");
-  }
+function DecorateWithEventEmitter(instance) {
+  var ee = new EventEmitter();
+  instance.on = ee.on.bind(ee);
+  instance.off = ee.off.bind(ee);
+  instance.once = ee.once.bind(ee);
+  instance.emit = ee.emit.bind(ee);
+  instance.removeAllListeners = ee.removeAllListeners.bind(ee);
 }
 
-function ClearPrivateData() {
-  var request = navigator.mozApps.getSelf();
-  request.onsuccess = function() {
-    request.result.clearBrowserData();
-  };
+function nextTick(callback) {
+  setTimeout(callback, 0);
 }
 
-function KillAllTabsAndClearPrivateData() {
-  document.querySelector("#tabs").innerHTML = "";
-  document.querySelector("#deck").innerHTML = "";
-  ClearPrivateData();
-  HideKillButtonIfNeeded();
-}
+window.addEventListener("DOMContentLoaded", UI.init, true);
+window.addEventListener("unload", UI.uninit, true);
+document.addEventListener("visibilitychange", UI.onVisibilityChange, true);
+navigator.mozSetMessageHandler("activity", UI.onActivityRequestfunction);

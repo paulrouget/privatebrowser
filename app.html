@@ -7,11 +7,20 @@
     <link rel="stylesheet" href="app.css">
     <link rel="stylesheet" href="font-awesome/font-awesome.min.css">
     <script type="text/javascript" src="app.js" defer></script>
+    <script type="text/javascript" src="EventEmitter/EventEmitter.js" defer></script>
   </head>
   <body>
+    <div id="urlbar">
+      <button id="button-back" class="button-history fa fa-arrow-left"></button>
+      <button id="button-forward" class="button-history fa fa-arrow-right"></button>
+      <input  id="input-url" type="url" placeholder="">
+      <button id="button-go" class="fa fa-arrow-right"></button>
+      <button id="button-stop" class="fa fa-times"></button>
+      <button id="button-reload" class="fa fa-rotate-right"></button>
+      <button id="button-menu" class="fa fa-navicon"></button>
+    </div>
     <div id="deck"></div>
     <div id="tabstrip">
-      <button id="button-killtab" class="fa fa-trash-o" hidden></button>
       <div id="tabs"></div>
       <button id="button-addtab" class="fa fa-plus"></button>
     </div>
